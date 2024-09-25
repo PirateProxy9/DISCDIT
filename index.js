@@ -26,13 +26,13 @@ const clientSecret = process.env.CLIENT_SECRET;
 const refreshToken = process.env.REFRESH_TOKEN;
 const userAgent = 'DiscordRedditBot';
 const redditBaseUrl = 'https://www.reddit.com/api/v1/access_token';
-const subredditSettings = {}; // User settings for monitoring specific subreddits
 const cache = new Map(); // Caching mechanism for posts still not in use prolly in futur Updatesss
 let posts = []; // Array to store fetched posts
 let currentIndex = 0; // Track current post index
 let postMessages = {}; // Store message IDs associated with post IDs
 const sentPostUrls = new Set(); // To track URLs of sent posts
-
+const subredditSettings = {}; // Maps Guild IDs to subreddit settings
+const channelSettings = {}; // Maps Guild IDs to channel settings
 // Set up logger
 const logger = winston.createLogger({
     level: 'info',
@@ -78,8 +78,8 @@ const reddit = new snoowrap({
 });
 
 // Channel to post updates
-const CHANNEL_ID = '1271589750725279817';  // Put a valid Discord Channel ID mf :skull:
-const SUBREDDIT_NAME = 'whowouldcirclejerk'; // Adjust this to your corresponding Subreddit
+const CHANNEL_ID = '';  // Put a valid Discord Channel ID mf :skull:
+const SUBREDDIT_NAME = ''; // Adjust this to your corresponding Subreddit
 
 // Ready Event
 client.once('ready', () => {
@@ -95,10 +95,12 @@ client.once('ready', () => {
 });
 
 // Fetch new posts from the subreddit
+// Update the fetchNewPosts function to use the set subreddit and channel
 async function fetchNewPosts() {
     try {
         await refreshAccessToken();
-        posts = await reddit.getSubreddit(SUBREDDIT_NAME).getNew({ limit: 1 }); // Fetch the latest 5 posts
+        const subreddit = subredditSettings[client.guilds.cache.first().id] || SUBREDDIT_NAME; // Default if none set
+        posts = await reddit.getSubreddit(subreddit).getNew({ limit: 1 }); // Fetch the latest post
         currentIndex = 0; // Reset the index
 
         if (posts.length > 0) {
@@ -118,12 +120,13 @@ async function fetchNewPosts() {
         logger.error('Failed to fetch new posts:', error.response?.data || error.message);
     }
 }
-
-// Function to send a post embed
+// Update the sendPostEmbed function to use the set channel
 async function sendPostEmbed(post) {
     try {
         const embed = await createEmbed(post);
-        const channel = await client.channels.fetch(CHANNEL_ID);
+        const guildId = client.guilds.cache.first().id;
+        const channelId = channelSettings[guildId] || CHANNEL_ID; // Default if none set
+        const channel = await client.channels.fetch(channelId);
         if (!channel) {
             throw new Error('Channel not found.');
         }
@@ -136,7 +139,6 @@ async function sendPostEmbed(post) {
         console.error('Failed to send post embed:', error);
     }
 }
-
 // Create embed for posts
 async function createEmbed(post) {
     try {
@@ -250,12 +252,24 @@ async function showTopComments(post, interaction) {
     }
 }
 
+// Add these lines to store user-specific subreddit and channel settings
+const subredditSettings = {}; // Maps Guild IDs to subreddit settings
+const channelSettings = {}; // Maps Guild IDs to channel settings
+
 // Command handling
 client.on('messageCreate', async message => {
     if (!message.content.startsWith(prefix) || message.author.bot) return;
 
     const args = message.content.slice(prefix.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
+
+    // Ensure only admins or higher can use these commands
+    const member = message.guild.members.cache.get(message.author.id);
+    if (command === 'setsubreddit' || command === 'setchannel') {
+        if (!member.permissions.has('ADMINISTRATOR')) {
+            return message.reply('You do not have permission to use this command.');
+        }
+    }
 
     // Check for command cooldown
     if (commandCooldowns.has(message.author.id)) {
@@ -272,7 +286,30 @@ client.on('messageCreate', async message => {
     // Set the cooldown
     commandCooldowns.set(message.author.id, Date.now());
 
-    if (command === 'fetch') {
+    if (command === 'setsubreddit') {
+        const subreddit = args[0];
+        if (!subreddit) {
+            return message.reply('Please provide a valid subreddit name.');
+        }
+        subredditSettings[message.guild.id] = subreddit;
+        return message.reply(`Subreddit set to r/${subreddit}.`);
+    } else if (command === 'setchannel') {
+        const channelId = args[0];
+        const channel = message.guild.channels.cache.get(channelId) || message.mentions.channels.first();
+        if (!channel) {
+            return message.reply('Please provide a valid channel ID or mention.');
+        }
+        channelSettings[message.guild.id] = channel.id;
+        return message.reply(`Channel set to ${channel}.`);
+    } else if (command === 'help') {
+        return message.reply(`
+        **Bot Commands:**
+        - \`!setsubreddit <subreddit>\` - Sets the subreddit to monitor. (Admins only)
+        - \`!setchannel <channel>\` - Sets the channel where updates will be posted. (Admins only)
+        - \`!fetch\` - Fetches the latest posts from the set subreddit.
+        - \`!comments <postId>\` - Fetches top comments from a specific post.
+        `);
+    } else if (command === 'fetch') {
         try {
             await fetchNewPosts();
             await message.reply('New posts fetched and displayed.');
