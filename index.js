@@ -31,8 +31,7 @@ let posts = []; // Array to store fetched posts
 let currentIndex = 0; // Track current post index
 let postMessages = {}; // Store message IDs associated with post IDs
 const sentPostUrls = new Set(); // To track URLs of sent posts
-const subredditSettings = {}; // Maps Guild IDs to subreddit settings
-const channelSettings = {}; // Maps Guild IDs to channel settings
+
 // Set up logger
 const logger = winston.createLogger({
     level: 'info',
